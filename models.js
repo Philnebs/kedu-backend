@@ -1,13 +1,12 @@
 const mongoose = require('mongoose');
 
-// 1. User & Wallet Layout (Updated for Legal Registration Compliance)
 const UserSchema = new mongoose.Schema({
-  phoneNumber: { type: String, required: true, unique: true },
-  legalFullName: { type: String, required: true }, // 👈 Added for CBN bank verification matching
-  stateOfResidence: { type: String, required: true }, // 👈 Added for localized AdMob targeting analytics
+  phoneNumber: { type: String, required: true, unique: true, index: true },
+  legalFullName: { type: String, required: true },
+  stateOfResidence: { type: String, required: true },
   verifiedName: { type: String, default: "" }, 
   wallet: {
-    coinBalance: { type: Number, default: 0, min: 0 }, // Starts fresh at 0
+    coinBalance: { type: Number, default: 0, min: 0 },
     dailyAccumulatedCoins: { type: Number, default: 0, max: 600 },
     lastResetAt: { type: Date, default: Date.now }
   },
@@ -21,8 +20,8 @@ const UserSchema = new mongoose.Schema({
 });
 
 const ChatSessionSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  roomId: { type: String, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  roomId: { type: String, required: true, index: true },
   enteredAt: { type: Date, required: true },
   exitedAt: { type: Date, required: true },
   durationSeconds: { type: Number, default: 0 },
@@ -30,7 +29,16 @@ const ChatSessionSchema = new mongoose.Schema({
   flags: [{ type: String }] 
 });
 
+const MessageSchema = new mongoose.Schema({
+  roomId: { type: String, required: true, index: true },
+  senderPhone: { type: String, required: true, index: true },
+  text: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now }
+});
+MessageSchema.index({ roomId: 1, timestamp: 1 });
+
 module.exports = {
   User: mongoose.model('User', UserSchema),
-  ChatSession: mongoose.model('ChatSession', ChatSessionSchema)
+  ChatSession: mongoose.model('ChatSession', ChatSessionSchema),
+  Message: mongoose.model('Message', MessageSchema)
 };

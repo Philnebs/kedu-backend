@@ -4,6 +4,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
+const giftController = require('./giftController');
 
 const rewardController = require('./rewardController');
 const authController = require('./authController'); 
@@ -28,6 +29,13 @@ app.post('/api/auth/login', authController.loginOrRegister);
 app.post('/api/rewards/exit-chat', authController.authenticateToken, rewardController.processChatExit);
 app.post('/api/payouts/verify-bank', authController.authenticateToken, payoutController.verifyBankAccount);
 app.post('/api/payouts/withdraw', authController.authenticateToken, payoutController.requestWithdrawal);
+
+// GIFT ROUTES
+app.get('/api/gifts', giftController.getGifts);
+app.post('/api/gifts/buy', giftController.buyGift);
+app.post('/api/gifts/webhook', giftController.flwWebhook);
+app.post('/api/gifts/send', giftController.sendGift);
+app.get('/api/gifts/stats/:userId', giftController.myGiftStats);
 
 // NEW: Real contacts discovery - fixes empty chat list on 2 phones
 app.post('/api/contacts/sync', authController.authenticateToken, async (req, res) => {

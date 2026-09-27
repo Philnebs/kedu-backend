@@ -4,25 +4,30 @@ const express = require('express');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
+const cors = require('cors');
 const giftController = require('./giftController');
-
 const rewardController = require('./rewardController');
 const authController = require('./authController'); 
 const payoutController = require('./payoutController');
 const { User, Message } = require('./models');
 
 const app = express();
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" }, pingTimeout: 60000 });
+const io = new Server(server, { 
+  cors: { origin: "*", methods: ["GET", "POST"] }, 
+  pingTimeout: 60000,
+  pingInterval: 25000
+});
 
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('🟢 Kedu Engine: Connected to MongoDB Atlas Cloud Database.'))
-  .catch((err) => console.error('🔴 Kedu Engine Connection Error:', err));
+  .then(() => console.log('🟢 Kedu Engine: Connected to MongoDB Atlas'))
+  .catch((err) => console.error('🔴 Connection Error:', err));
 
 app.get('/', (req, res) => {
-  res.json({ status: "online", application: "Kedu Chat-to-Earn Engine API" });
+  res.json({ status: "online", application: "Kedu Chat-to-Earn Engine API", version: "2.1" });
 });
 
 app.post('/api/auth/login', authController.loginOrRegister);
@@ -37,7 +42,7 @@ app.post('/api/gifts/webhook', giftController.flwWebhook);
 app.post('/api/gifts/send', giftController.sendGift);
 app.get('/api/gifts/stats/:userId', giftController.myGiftStats);
 
-// NEW: Real contacts discovery - fixes empty chat list on 2 phones
+// ====== FIXED CONTACTS SYNC - THIS ENABLES YOU TO CHAT WITH ANOTHER USER ======
 app.post('/api/contacts/sync', authController.authenticateToken, async (req, res) => {
   try {
     const { contacts } = req.body;
@@ -49,54 +54,130 @@ app.post('/api/contacts/sync', authController.authenticateToken, async (req, res
       if (phone.startsWith('+234')) phone = '0' + phone.substring(4);
       else if (phone.startsWith('234')) phone = '0' + phone.substring(3);
       return phone;
-    }).filter(p => p.length === 11 && p !== myPhone);
+    }).filter(p => p.length >= 10 && p !== myPhone);
 
+    // Find all users whose phone is in the list
     const keduUsers = await User.find(
       { phoneNumber: { $in: normalized } },
-      { legalFullName: 1, phoneNumber: 1, stateOfResidence: 1 }
+      { legalFullName: 1, phoneNumber: 1, stateOfResidence: 1, wallet: 1 }
     ).limit(100);
 
-    res.json({ keduUsers });
+    console.log(`📱 Sync: ${myPhone} found ${keduUsers.length} Kedu users`);
+    res.json({ keduUsers, count: keduUsers.length });
   } catch (err) {
+    console.error("Sync error:", err);
     res.status(500).json({ error: "Failed to sync contacts" });
   }
 });
 
-// NEW: Load history when opening chat
+// ====== NEW: WALLET BALANCE - FIXES EMPTY PROFILE ======
+app.post('/api/wallet/balance', authController.authenticateToken, async (req, res) => {
+  try {
+    const phone = req.body.phoneNumber || req.user.phoneNumber;
+    const user = await User.findOne({ phoneNumber: phone });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    
+    res.json({ 
+      user: {
+        legalFullName: user.legalFullName,
+        phoneNumber: user.phoneNumber,
+        wallet: { coinBalance: user.wallet?.coinBalance || 0 },
+        giftEarningsUSD: user.giftEarningsUSD || 0,
+        _id: user._id
+      },
+      coins: user.wallet?.coinBalance || 0,
+      giftUSD: user.giftEarningsUSD || 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get balance" });
+  }
+});
+
+app.post('/api/wallet/add', async (req, res) => {
+  try {
+    const { phoneNumber, amount } = req.body;
+    const coinsToAdd = parseInt(amount) || 10;
+
+    const user = await User.findOneAndUpdate(
+      { phoneNumber: phoneNumber },
+      { $inc: { 'wallet.coinBalance': coinsToAdd } },
+      { new: true }
+    );
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({ 
+      success: true, 
+      newBalance: user.wallet.coinBalance,
+      added: coinsToAdd 
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ====== LOAD CHAT HISTORY ======
 app.get('/api/messages/:roomId', authController.authenticateToken, async (req, res) => {
   try {
-    const messages = await Message.find({ roomId: req.params.roomId }).sort({ timestamp: 1 }).limit(100);
+    const messages = await Message.find({ roomId: req.params.roomId }).sort({ timestamp: 1 }).limit(200);
     res.json({ messages });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
 
+// ====== DEBUG: LIST ALL USERS (remove in production) ======
+app.get('/api/debug/users', async (req, res) => {
+  const users = await User.find({}, { phoneNumber: 1, legalFullName: 1 }).limit(20);
+  res.json(users);
+});
+
+// ====== SOCKET.IO REAL-TIME CHAT ======
 io.on('connection', (socket) => {
-  socket.on('join_room', (roomId) => socket.join(roomId));
+  console.log(`⚡ User connected: ${socket.id}`);
+  
+  socket.on('join_room', (roomId) => {
+    socket.join(roomId);
+    console.log(`📥 ${socket.id} joined ${roomId}`);
+    socket.to(roomId).emit('user_joined', { roomId, socketId: socket.id });
+  });
   
   socket.on('send_message', async (data) => {
     try {
-      if (!data.roomId || !data.text) return;
-      await Message.create({
+      if (!data.roomId || !data.text || !data.senderPhone) return;
+      
+      const msg = await Message.create({
         roomId: data.roomId,
         senderPhone: data.senderPhone,
         text: data.text,
         timestamp: new Date()
       });
+      
       io.to(data.roomId).emit('receive_message', {
         roomId: data.roomId,
         senderPhone: data.senderPhone,
         text: data.text,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        _id: msg._id
       });
+      
+      console.log(`💬 ${data.senderPhone} -> ${data.roomId}: ${data.text.substring(0,30)}`);
     } catch (err) {
       console.error("Message save error:", err.message);
     }
+  });
+
+  socket.on('typing', (data) => {
+    socket.to(data.roomId).emit('user_typing', { roomId: data.roomId, senderPhone: data.senderPhone });
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`❌ Disconnected: ${socket.id}`);
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Kedu Server running actively with WebSockets on port ${PORT}`);
+  console.log(`🚀 Kedu Server v2.1 running with Chat + Wallet on port ${PORT}`);
 });

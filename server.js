@@ -9,7 +9,7 @@ const giftController = require('./giftController');
 const rewardController = require('./rewardController');
 const authController = require('./authController'); 
 const payoutController = require('./payoutController');
-const { User, Message } = require('./models');
+const { User, Message, KeduSpot } = require('./models');
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -117,6 +117,85 @@ app.post('/api/wallet/add', async (req, res) => {
   }
 });
 
+// ====== KEDU LIVE+ : NAIJA ADDRESS FORMATTER ======
+
+
+function toNaijaAddress(googleResult) {
+  // Takes Google/Mapbox raw and turns to Naija style
+  const comp = googleResult.address_components || [];
+  let street = "", area = "", landmark = "";
+
+  // Extract
+  for (let c of comp) {
+    if (c.types.includes("route")) street = c.long_name;
+    if (c.types.includes("sublocality") || c.types.includes("neighborhood")) area = c.long_name;
+    if (c.types.includes("point_of_interest") || c.types.includes("establishment")) landmark = c.long_name;
+  }
+
+  // Fallback from formatted_address
+  if (!area) {
+    const parts = (googleResult.formatted_address || "").split(",");
+    area = parts.length > 1? parts[parts.length-3]?.trim() : "";
+  }
+
+  // Build Naija style
+  const landmarkStr = landmark? `Near ${landmark}` : (street? `Near ${street}` : "Around");
+  const areaStr = area? `${area}` : "";
+
+  return {
+    address_raw: googleResult.formatted_address || "",
+    address_naija: areaStr? `${landmarkStr}, ${areaStr}` : landmarkStr,
+    landmark: landmark || street,
+    area: area
+  };
+}
+
+app.post('/api/location/reverse', authController.authenticateToken, async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+    if (!latitude ||!longitude) return res.status(400).json({ error: "lat/lng required" });
+
+    // Call Google Geocoding (you need GOOGLE_MAPS_KEY in Render env)
+    const googleKey = process.env.GOOGLE_MAPS_KEY;
+    let googleData = null;
+
+    if (googleKey) {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleKey}`;
+      const r = await fetch(url);
+      const j = await r.json();
+      googleData = j.results?.[0];
+    }
+
+    if (!googleData) {
+      // Fallback if no API key yet - still works
+      return res.json({
+        latitude, longitude,
+        address_raw: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+        address_naija: `Around ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+        landmark: "Current Location",
+        area: "My Area"
+      });
+    }
+
+    const naija = toNaijaAddress(googleData);
+    res.json({ latitude, longitude,...naija });
+
+  } catch (err) {
+    console.error("reverse error", err);
+    res.status(500).json({ error: "reverse failed" });
+  }
+});
+
+// Spots: save and get
+app.post('/api/spots', authController.authenticateToken, async (req, res) => {
+  const spot = await KeduSpot.create({ userPhone: req.user.phoneNumber,...req.body });
+  res.json({ spot });
+});
+app.get('/api/spots', authController.authenticateToken, async (req, res) => {
+  const spots = await KeduSpot.find({ userPhone: req.user.phoneNumber }).sort({ createdAt: -1 });
+  res.json({ spots });
+});
+
 // ====== LOAD CHAT HISTORY ======
 app.get('/api/messages/:roomId', authController.authenticateToken, async (req, res) => {
   try {
@@ -148,20 +227,27 @@ io.on('connection', (socket) => {
       if (!data.roomId || !data.text || !data.senderPhone) return;
       
       const msg = await Message.create({
-        roomId: data.roomId,
-        senderPhone: data.senderPhone,
-        text: data.text,
-        timestamp: new Date()
-      });
-      
-      io.to(data.roomId).emit('receive_message', {
-        roomId: data.roomId,
-        senderPhone: data.senderPhone,
-        text: data.text,
-        timestamp: new Date().toISOString(),
-        _id: msg._id
-      });
-      
+  roomId: data.roomId,
+  senderPhone: data.senderPhone,
+  text: data.text,
+  type: data.type || 'text',
+  locationData: data.locationData || null,
+  replyTo: data.replyTo,
+  replyToSender: data.replyToSender,
+  timestamp: new Date()
+});
+
+io.to(data.roomId).emit('receive_message', {
+  roomId: data.roomId,
+  senderPhone: data.senderPhone,
+  text: data.text,
+  type: data.type || 'text',
+  locationData: data.locationData || null,
+  timestamp: new Date().toISOString(),
+  _id: msg._id,
+  replyTo: data.replyTo,
+  replyToSender: data.replyToSender,
+});
       console.log(`💬 ${data.senderPhone} -> ${data.roomId}: ${data.text.substring(0,30)}`);
     } catch (err) {
       console.error("Message save error:", err.message);

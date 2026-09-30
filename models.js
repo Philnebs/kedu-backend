@@ -50,10 +50,37 @@ const MessageSchema = new mongoose.Schema({
   roomId: { type: String, required: true, index: true },
   senderPhone: { type: String, required: true, index: true },
   text: { type: String, required: true },
+  type: { type: String, enum: ["text", "location", "live_location", "voice_location"], default: "text" },
+  locationData: {
+    latitude: Number,
+    longitude: Number,
+    accuracy: Number,
+    address_raw: String,
+    address_naija: String,
+    landmark: String,
+    area: String,
+    voiceNoteUrl: String,
+    junctionPhotoUrl: String,
+    isSpot: { type: Boolean, default: false }
+  },
+  replyTo: String,
+  replyToSender: String,
+  replyToId: String,
   timestamp: { type: Date, default: Date.now }
 });
 MessageSchema.index({ roomId: 1, timestamp: 1 });
 
+// NEW: My Spots
+const KeduSpotSchema = new mongoose.Schema({
+  userPhone: { type: String, required: true, index: true },
+  name: { type: String, required: true }, // Home, Shop, Church
+  emoji: { type: String, default: "📍" },
+  latitude: Number,
+  longitude: Number,
+  naijaAddress: String,
+  createdAt: { type: Date, default: Date.now }
+});
+const KeduSpot = mongoose.model('KeduSpot', KeduSpotSchema);
 // === KEDU GIFTS CATALOG ===
 const giftCatalogSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true, index: true }, // pebble, rose...
@@ -96,5 +123,6 @@ module.exports = {
   ChatSession: mongoose.model('ChatSession', ChatSessionSchema),
   Message: mongoose.model('Message', MessageSchema),
   GiftCatalog,
-  GiftTransaction
+  GiftTransaction,
+  KeduSpot
 };

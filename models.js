@@ -118,11 +118,25 @@ const giftTransactionSchema = new mongoose.Schema({
 }, { timestamps: true });
 const GiftTransaction = mongoose.model('GiftTransaction', giftTransactionSchema);
 
+const KeduGroupSchema = new mongoose.Schema({
+  groupId: { type: String, unique: true, required: true },
+  roomId: { type: String, unique: true, required: true }, // e.g group_1712345678_ab12
+  groupName: { type: String, required: true },
+  groupPhoto: { type: String, default: "" }, // base64 or URL
+  description: { type: String, default: "" },
+  adminPhones: [{ type: String }], // can be multiple admins
+  memberPhones: [{ type: String }],
+  createdBy: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+const KeduGroup = mongoose.model('KeduGroup', KeduGroupSchema);
+
 module.exports = {
   User: mongoose.model('User', UserSchema),
   ChatSession: mongoose.model('ChatSession', ChatSessionSchema),
   Message: mongoose.model('Message', MessageSchema),
   GiftCatalog,
   GiftTransaction,
-  KeduSpot
+  KeduSpot,
+  KeduGroup
 };

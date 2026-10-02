@@ -10,6 +10,7 @@ const rewardController = require('./rewardController');
 const authController = require('./authController');
 const payoutController = require('./payoutController');
 const { User, Message, KeduSpot } = require('./models');
+const groupController = require('./groupController');
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -40,6 +41,14 @@ app.post('/api/gifts/buy', giftController.buyGift);
 app.post('/api/gifts/webhook', giftController.flwWebhook);
 app.post('/api/gifts/send', giftController.sendGift);
 app.get('/api/gifts/stats/:userId', giftController.myGiftStats);
+
+// ====== GROUP ROUTES ======
+app.post('/api/groups/create', authController.authenticateToken, groupController.createGroup);
+app.get('/api/groups/my-groups', authController.authenticateToken, groupController.myGroups);
+app.post('/api/groups/add-members', authController.authenticateToken, groupController.addMembers);
+app.post('/api/groups/remove-member', authController.authenticateToken, groupController.removeMember);
+app.post('/api/groups/make-admin', authController.authenticateToken, groupController.makeAdmin);
+app.post('/api/groups/update-photo', authController.authenticateToken, groupController.updateGroupPhoto);
 
 app.post('/api/contacts/sync', authController.authenticateToken, async (req, res) => {
   try {

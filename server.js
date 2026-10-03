@@ -49,27 +49,28 @@ app.post('/api/groups/add-members', authController.authenticateToken, groupContr
 app.post('/api/groups/remove-member', authController.authenticateToken, groupController.removeMember);
 app.post('/api/groups/make-admin', authController.authenticateToken, groupController.makeAdmin);
 app.post('/api/groups/update-photo', authController.authenticateToken, groupController.updateGroupPhoto);
+app.post('/api/groups/leave', authController.authenticateToken, groupController.leaveGroup);
+app.post('/api/groups/delete', authController.authenticateToken, groupController.deleteGroup);
 
 app.post('/api/contacts/sync', authController.authenticateToken, async (req, res) => {
   try {
     const { contacts } = req.body;
     const myPhone = req.user.phoneNumber;
-    if (!contacts ||!Array.isArray(contacts)) return res.status(400).json({ error: "Contacts array required" });
+    if (!contacts || !Array.isArray(contacts)) return res.status(400).json({ error: "Contacts array required" });
     const normalized = contacts.map(p => {
-      let phone = p.toString().replace(/\s+|-/g, '').trim();
+      let phone = p.toString().replace(/[\s|-]/g, '').trim();
       if (phone.startsWith('+234')) phone = '0' + phone.substring(4);
       else if (phone.startsWith('234')) phone = '0' + phone.substring(3);
       return phone;
     }).filter(p => p.length >= 10 && p!== myPhone);
-    const keduUsers = await User.find({ phoneNumber: { $in: normalized } }, { legalFullName: 1, phoneNumber: 1, stateOfResidence: 1, wallet: 1 }).limit(100);
-    console.log(`📱 Sync: ${myPhone} found ${keduUsers.length} Kedu users`);
+    const keduUsers = await User.find({ phoneNumber: { $in: normalized } }, { legalFullName: 1, phoneNumber: 1, profilePhoto: 1 });
+    console.log(` Sync: ${myPhone} found ${keduUsers.length} Kedu users`);
     res.json({ keduUsers, count: keduUsers.length });
   } catch (err) {
     console.error("Sync error:", err);
     res.status(500).json({ error: "Failed to sync contacts" });
   }
 });
-
 app.post('/api/wallet/balance', authController.authenticateToken, async (req, res) => {
   try {
     const phone = req.body.phoneNumber || req.user.phoneNumber;

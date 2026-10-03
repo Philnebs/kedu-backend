@@ -119,4 +119,58 @@ exports.updateGroupPhoto = async (req, res) => {
     await group.save();
     res.json({ success: true, group });
   } catch (err) { res.status(500).json({ error: "Failed" }); }
+
+  exports.leaveGroup = async (req, res) => {
+  try {
+    const { groupId } = req.body;
+    const myPhone = req.user.phoneNumber;
+    const group = await KeduGroup.findOne({ groupId });
+    if (!group) return res.status(404).json({ error: "Group not found" });
+
+    // Remove me from members
+    group.memberPhones = group.memberPhones.filter(p => p!== myPhone);
+    if(group.members) group.members = group.members.filter(p => p!== myPhone);
+    group.adminPhones = group.adminPhones.filter(p => p!== myPhone);
+
+    // If no members left, delete group
+    if (group.memberPhones.length === 0) {
+      await KeduGroup.deleteOne({ groupId });
+      return res.json({ success: true, deleted: true, message: "Group deleted, no members left" });
+    }
+
+    // If creator left, assign new creator
+    if (group.createdBy === myPhone) {
+      group.createdBy = group.memberPhones[0];
+      if (!group.adminPhones.includes(group.createdBy)) {
+        group.adminPhones.push(group.createdBy);
+      }
+    }
+
+    await group.save();
+    res.json({ success: true, group, left: true });
+  } catch (err) {
+    console.error("leaveGroup error", err);
+    res.status(500).json({ error: "Failed to leave group" });
+  }
+};
+
+exports.deleteGroup = async (req, res) => {
+  try {
+    const { groupId } = req.body;
+    const myPhone = req.user.phoneNumber;
+    const group = await KeduGroup.findOne({ groupId });
+    if (!group) return res.status(404).json({ error: "Group not found" });
+
+    // Only creator or admin can delete whole group
+    if (group.createdBy!== myPhone &&!group.adminPhones.includes(myPhone)) {
+      return res.status(403).json({ error: "Only admin can delete group" });
+    }
+
+    await KeduGroup.deleteOne({ groupId });
+    res.json({ success: true, message: "Group deleted permanently" });
+  } catch (err) {
+    console.error("deleteGroup error", err);
+    res.status(500).json({ error: "Failed to delete group" });
+  }
+};
 };

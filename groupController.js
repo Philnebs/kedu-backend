@@ -9,15 +9,17 @@ exports.createGroup = async (req, res) => {
     const { groupName, memberPhones, groupPhoto, description } = req.body;
     const myPhone = req.user.phoneNumber;
 
-    if (!groupName ||!memberPhones || memberPhones.length < 2) {
-      return res.status(400).json({ error: "Group name and at least 2 members required" });
+    console.log("Create group request:", groupName, memberPhones, "by", myPhone);
+
+    if (!groupName ||!memberPhones || memberPhones.length < 1) {
+      return res.status(400).json({ error: "Group name and at least 1 member required" });
     }
 
-    // Ensure creator is included
+    // Ensure creator is included + remove duplicates
     let allMembers = [...new Set([myPhone,...memberPhones])];
 
     const groupId = genGroupId();
-    const roomId = groupId; // we use same as roomId for socket
+    const roomId = groupId;
 
     const group = await KeduGroup.create({
       groupId,
@@ -27,9 +29,11 @@ exports.createGroup = async (req, res) => {
       description: description || "",
       adminPhones: [myPhone],
       memberPhones: allMembers,
+      members: allMembers, // save both for compatibility
       createdBy: myPhone
     });
 
+    console.log("Group created:", group.groupId, "members:", allMembers.length);
     res.json({ success: true, group });
 
   } catch (err) {
@@ -42,25 +46,34 @@ exports.myGroups = async (req, res) => {
   try {
     const myPhone = req.user.phoneNumber;
     const groups = await KeduGroup.find({ memberPhones: myPhone }).sort({ createdAt: -1 });
-    res.json({ groups });
+
+    // Ensure frontend gets both fields
+    const enriched = groups.map(g => {
+      const obj = g.toObject();
+      obj.members = obj.memberPhones; // frontend compatibility
+      return obj;
+    });
+
+    console.log(`myGroups for ${myPhone}: ${enriched.length} groups`);
+    res.json({ groups: enriched });
   } catch (err) {
+    console.error("myGroups error", err);
     res.status(500).json({ error: "Failed to get groups" });
   }
 };
 
+//... keep addMembers, removeMember, makeAdmin, updateGroupPhoto same as before...
 exports.addMembers = async (req, res) => {
   try {
     const { groupId, newPhones } = req.body;
     const myPhone = req.user.phoneNumber;
-
     const group = await KeduGroup.findOne({ groupId });
     if (!group) return res.status(404).json({ error: "Group not found" });
     if (!group.adminPhones.includes(myPhone)) return res.status(403).json({ error: "Only admin can add" });
-
     let updated = [...new Set([...group.memberPhones,...newPhones])];
     group.memberPhones = updated;
+    group.members = updated;
     await group.save();
-
     res.json({ success: true, group });
   } catch (err) { res.status(500).json({ error: "Failed" }); }
 };
@@ -69,16 +82,14 @@ exports.removeMember = async (req, res) => {
   try {
     const { groupId, phoneToRemove } = req.body;
     const myPhone = req.user.phoneNumber;
-
     const group = await KeduGroup.findOne({ groupId });
     if (!group) return res.status(404).json({ error: "Group not found" });
     if (!group.adminPhones.includes(myPhone)) return res.status(403).json({ error: "Only admin" });
     if (phoneToRemove === group.createdBy) return res.status(400).json({ error: "Cannot remove creator" });
-
     group.memberPhones = group.memberPhones.filter(p => p!== phoneToRemove);
+    group.members = group.memberPhones;
     group.adminPhones = group.adminPhones.filter(p => p!== phoneToRemove);
     await group.save();
-
     res.json({ success: true, group });
   } catch (err) { res.status(500).json({ error: "Failed" }); }
 };
@@ -87,17 +98,14 @@ exports.makeAdmin = async (req, res) => {
   try {
     const { groupId, phone } = req.body;
     const myPhone = req.user.phoneNumber;
-
     const group = await KeduGroup.findOne({ groupId });
     if (!group) return res.status(404).json({ error: "Not found" });
     if (!group.adminPhones.includes(myPhone)) return res.status(403).json({ error: "Only admin" });
     if (!group.memberPhones.includes(phone)) return res.status(400).json({ error: "Not a member" });
-
     if (!group.adminPhones.includes(phone)) {
       group.adminPhones.push(phone);
       await group.save();
     }
-
     res.json({ success: true, group });
   } catch (err) { res.status(500).json({ error: "Failed" }); }
 };
@@ -107,7 +115,6 @@ exports.updateGroupPhoto = async (req, res) => {
     const { groupId, groupPhoto } = req.body;
     const group = await KeduGroup.findOne({ groupId });
     if (!group) return res.status(404).json({ error: "Not found" });
-
     group.groupPhoto = groupPhoto;
     await group.save();
     res.json({ success: true, group });

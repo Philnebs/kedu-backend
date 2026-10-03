@@ -50,7 +50,7 @@ const MessageSchema = new mongoose.Schema({
   roomId: { type: String, required: true, index: true },
   senderPhone: { type: String, required: true, index: true },
   text: { type: String, required: true },
-  type: { type: String, enum: ["text", "location", "live_location", "voice_location"], default: "text" },
+  type: { type: String, enum: ["text", "location", "live_location", "voice_location", "voice"], default: "text" },
   locationData: {
     latitude: Number,
     longitude: Number,
@@ -63,13 +63,16 @@ const MessageSchema = new mongoose.Schema({
     junctionPhotoUrl: String,
     isSpot: { type: Boolean, default: false }
   },
+  // VOICE NOTE FIELDS - NEW
+  voiceUrl: String,
+  voiceNoteUrl: String,
+  duration: Number,
   replyTo: String,
   replyToSender: String,
   replyToId: String,
   timestamp: { type: Date, default: Date.now }
 });
 MessageSchema.index({ roomId: 1, timestamp: 1 });
-
 // NEW: My Spots
 const KeduSpotSchema = new mongoose.Schema({
   userPhone: { type: String, required: true, index: true },

@@ -11,10 +11,28 @@ const authController = require('./authController');
 const payoutController = require('./payoutController');
 const { User, Message, KeduSpot } = require('./models');
 const groupController = require('./groupController');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
+
+// CREATE UPLOADS FOLDER IF NOT EXISTS
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads', { recursive: true });
+}
+
+// MAKE UPLOADS PUBLIC
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// MULTER CONFIG FOR VOICE
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => cb(null, `voice_${Date.now()}_${Math.round(Math.random()*1000)}.m4a`)
+});
+const upload = multer({ storage: storage });
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -28,7 +46,7 @@ mongoose.connect(process.env.MONGO_URI)
  .catch((err) => console.error('🔴 Connection Error:', err));
 
 app.get('/', (req, res) => {
-  res.json({ status: "online", application: "Kedu Chat-to-Earn Engine API", version: "2.1" });
+  res.json({ status: "online", application: "Kedu Chat-to-Earn Engine API", version: "2.2 + Voice" });
 });
 
 app.post('/api/auth/login', authController.loginOrRegister);
@@ -52,6 +70,27 @@ app.post('/api/groups/update-photo', authController.authenticateToken, groupCont
 app.post('/api/groups/leave', authController.authenticateToken, groupController.leaveGroup);
 app.post('/api/groups/delete', authController.authenticateToken, groupController.deleteGroup);
 
+// ====== VOICE NOTE UPLOAD - NEW ======
+app.post('/api/messages/upload-voice', authController.authenticateToken, upload.single('voice'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    
+    // Build full URL for Render
+    const voiceUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    console.log(`🎤 Voice uploaded: ${voiceUrl} duration:${req.body.duration}s`);
+    
+    res.json({ 
+      success: true,
+      voiceUrl: voiceUrl,
+      filename: req.file.filename,
+      duration: req.body.duration 
+    });
+  } catch (e) {
+    console.error("Voice upload error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/contacts/sync', authController.authenticateToken, async (req, res) => {
   try {
     const { contacts } = req.body;
@@ -71,6 +110,7 @@ app.post('/api/contacts/sync', authController.authenticateToken, async (req, res
     res.status(500).json({ error: "Failed to sync contacts" });
   }
 });
+
 app.post('/api/wallet/balance', authController.authenticateToken, async (req, res) => {
   try {
     const phone = req.body.phoneNumber || req.user.phoneNumber;
@@ -115,8 +155,6 @@ app.post('/api/location/reverse', authController.authenticateToken, async (req, 
   try {
     const { latitude, longitude } = req.body;
     if (!latitude ||!longitude) return res.status(400).json({ error: "lat/lng required" });
-
-    // Try Google first if key exists
     try {
       const googleKey = process.env.GOOGLE_MAPS_KEY;
       if (googleKey) {
@@ -129,8 +167,6 @@ app.post('/api/location/reverse', authController.authenticateToken, async (req, 
         }
       }
     } catch(e){}
-
-    // FREE fallback OSM - no key needed
     try {
       const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
       const osmRes = await fetch(osmUrl, { headers: { 'User-Agent': 'KeduApp/2.1' } });
@@ -187,6 +223,8 @@ io.on('connection', (socket) => {
         text: data.text,
         type: data.type || 'text',
         locationData: data.locationData || null,
+        voiceUrl: data.voiceUrl || null,
+        duration: data.duration || 0,
         replyTo: data.replyTo,
         replyToSender: data.replyToSender,
         timestamp: new Date()
@@ -197,16 +235,17 @@ io.on('connection', (socket) => {
         text: data.text,
         type: data.type || 'text',
         locationData: data.locationData || null,
+        voiceUrl: data.voiceUrl || null,
+        duration: data.duration || 0,
         timestamp: new Date().toISOString(),
         _id: msg._id,
         replyTo: data.replyTo,
         replyToSender: data.replyToSender,
       });
-      console.log(`💬 ${data.senderPhone} -> ${data.roomId}: ${data.text.substring(0,30)}`);
+      console.log(`💬 ${data.senderPhone} -> ${data.roomId}: ${data.type || 'text'}`);
     } catch (err) { console.error("Message save error:", err.message); }
   });
 
-  // === KEDU LIVE+ : TASK 1.4 ===
   socket.on('request_location', (data) => {
     const { roomId, requesterPhone, requesterName } = data;
     console.log(`📍 ${requesterPhone} requesting location in ${roomId}`);
@@ -241,5 +280,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Kedu Server v2.1 + Live+ Task 1.4 running on port ${PORT}`);
+  console.log(`🚀 Kedu Server v2.2 + Voice + Live+ running on port ${PORT}`);
 });

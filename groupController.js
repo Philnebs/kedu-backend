@@ -8,19 +8,13 @@ exports.createGroup = async (req, res) => {
   try {
     const { groupName, memberPhones, groupPhoto, description } = req.body;
     const myPhone = req.user.phoneNumber;
-
     console.log("Create group request:", groupName, memberPhones, "by", myPhone);
-
     if (!groupName ||!memberPhones || memberPhones.length < 1) {
       return res.status(400).json({ error: "Group name and at least 1 member required" });
     }
-
-    // Ensure creator is included + remove duplicates
     let allMembers = [...new Set([myPhone,...memberPhones])];
-
     const groupId = genGroupId();
     const roomId = groupId;
-
     const group = await KeduGroup.create({
       groupId,
       roomId,
@@ -29,13 +23,11 @@ exports.createGroup = async (req, res) => {
       description: description || "",
       adminPhones: [myPhone],
       memberPhones: allMembers,
-      members: allMembers, // save both for compatibility
+      members: allMembers,
       createdBy: myPhone
     });
-
     console.log("Group created:", group.groupId, "members:", allMembers.length);
     res.json({ success: true, group });
-
   } catch (err) {
     console.error("createGroup error", err);
     res.status(500).json({ error: "Failed to create group" });
@@ -46,14 +38,11 @@ exports.myGroups = async (req, res) => {
   try {
     const myPhone = req.user.phoneNumber;
     const groups = await KeduGroup.find({ memberPhones: myPhone }).sort({ createdAt: -1 });
-
-    // Ensure frontend gets both fields
     const enriched = groups.map(g => {
       const obj = g.toObject();
-      obj.members = obj.memberPhones; // frontend compatibility
+      obj.members = obj.memberPhones;
       return obj;
     });
-
     console.log(`myGroups for ${myPhone}: ${enriched.length} groups`);
     res.json({ groups: enriched });
   } catch (err) {
@@ -62,7 +51,6 @@ exports.myGroups = async (req, res) => {
   }
 };
 
-//... keep addMembers, removeMember, makeAdmin, updateGroupPhoto same as before...
 exports.addMembers = async (req, res) => {
   try {
     const { groupId, newPhones } = req.body;
@@ -119,33 +107,27 @@ exports.updateGroupPhoto = async (req, res) => {
     await group.save();
     res.json({ success: true, group });
   } catch (err) { res.status(500).json({ error: "Failed" }); }
+}; // <-- THIS WAS MISSING!
 
-  exports.leaveGroup = async (req, res) => {
+exports.leaveGroup = async (req, res) => {
   try {
     const { groupId } = req.body;
     const myPhone = req.user.phoneNumber;
     const group = await KeduGroup.findOne({ groupId });
     if (!group) return res.status(404).json({ error: "Group not found" });
-
-    // Remove me from members
     group.memberPhones = group.memberPhones.filter(p => p!== myPhone);
     if(group.members) group.members = group.members.filter(p => p!== myPhone);
     group.adminPhones = group.adminPhones.filter(p => p!== myPhone);
-
-    // If no members left, delete group
     if (group.memberPhones.length === 0) {
       await KeduGroup.deleteOne({ groupId });
       return res.json({ success: true, deleted: true, message: "Group deleted, no members left" });
     }
-
-    // If creator left, assign new creator
     if (group.createdBy === myPhone) {
       group.createdBy = group.memberPhones[0];
       if (!group.adminPhones.includes(group.createdBy)) {
         group.adminPhones.push(group.createdBy);
       }
     }
-
     await group.save();
     res.json({ success: true, group, left: true });
   } catch (err) {
@@ -160,17 +142,13 @@ exports.deleteGroup = async (req, res) => {
     const myPhone = req.user.phoneNumber;
     const group = await KeduGroup.findOne({ groupId });
     if (!group) return res.status(404).json({ error: "Group not found" });
-
-    // Only creator or admin can delete whole group
     if (group.createdBy!== myPhone &&!group.adminPhones.includes(myPhone)) {
       return res.status(403).json({ error: "Only admin can delete group" });
     }
-
     await KeduGroup.deleteOne({ groupId });
     res.json({ success: true, message: "Group deleted permanently" });
   } catch (err) {
     console.error("deleteGroup error", err);
     res.status(500).json({ error: "Failed to delete group" });
   }
-};
 };
